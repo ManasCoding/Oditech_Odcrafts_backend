@@ -1,0 +1,106 @@
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import compression from 'compression';
+import cookieParser from 'cookie-parser';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { env } from './config/env.js';
+import { corsOptions } from './config/cors.js';
+import { connectDatabase, disconnectDatabase } from './config/database.js';
+import { requestId } from './middleware/requestId.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import { logger } from './common/utils/logger.js';
+
+// Route imports
+import healthRoutes from './modules/health/health.routes.js';
+import authRoutes from './modules/auth/auth.routes.js';
+import usersRoutes from './modules/users/users.routes.js';
+import categoriesRoutes from './modules/categories/categories.routes.js';
+import craftsRoutes from './modules/crafts/crafts.routes.js';
+import productsRoutes from './modules/products/products.routes.js';
+import artisansRoutes from './modules/artisans/artisans.routes.js';
+import storiesRoutes from './modules/stories/stories.routes.js';
+import cartRoutes from './modules/cart/cart.routes.js';
+import wishlistRoutes from './modules/wishlist/wishlist.routes.js';
+import ordersRoutes from './modules/orders/orders.routes.js';
+import reviewsRoutes from './modules/reviews/reviews.routes.js';
+import notificationsRoutes from './modules/notifications/notifications.routes.js';
+import uploadsRoutes from './modules/uploads/uploads.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
+import sellerRoutes from './modules/seller/seller.routes.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const app = express();
+
+// ─── Security & Middleware ───────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+app.use(cors(corsOptions));
+app.use(compression() as express.RequestHandler);
+app.use(cookieParser());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(requestId);
+
+// ─── Static files (uploads) ──────────────────────────────────────────────────
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+app.use('/health', healthRoutes);
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/users', usersRoutes);
+app.use('/api/v1/categories', categoriesRoutes);
+app.use('/api/v1/crafts', craftsRoutes);
+app.use('/api/v1/products', productsRoutes);
+app.use('/api/v1/artisans', artisansRoutes);
+app.use('/api/v1/stories', storiesRoutes);
+app.use('/api/v1/cart', cartRoutes);
+app.use('/api/v1/wishlist', wishlistRoutes);
+app.use('/api/v1/orders', ordersRoutes);
+app.use('/api/v1/reviews', reviewsRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
+app.use('/api/v1/uploads', uploadsRoutes);
+app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/seller', sellerRoutes);
+
+// ─── 404 handler ─────────────────────────────────────────────────────────────
+app.use((_req, res) => {
+  res.status(404).json({ status: 'error', message: 'Route not found' });
+});
+
+// ─── Error handler ────────────────────────────────────────────────────────────
+app.use(errorHandler);
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+const PORT = parseInt(env.PORT, 10);
+
+async function start() {
+  try {
+    await connectDatabase();
+    const server = app.listen(PORT, () => {
+      logger.info(`🚀 Server running on http://localhost:${PORT} [${env.NODE_ENV}]`);
+    });
+
+    const gracefulShutdown = async (signal: string) => {
+      logger.info(`${signal} received — shutting down gracefully`);
+      server.close(async () => {
+        await disconnectDatabase();
+        logger.info('Server closed');
+        process.exit(0);
+      });
+      // Force exit after 10s
+      setTimeout(() => process.exit(1), 10000);
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  } catch (error) {
+    logger.error({ error }, 'Failed to start server');
+    process.exit(1);
+  }
+}
+
+start();
